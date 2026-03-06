@@ -1,14 +1,18 @@
 import logging
-from telegram import Update
-from telegram.ext import ContextTypes
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
 
-from utils.email_sender import email_sender
+from handlers.states import EmailStates
 from config import DEFAULT_RECIPIENT
 
 logger = logging.getLogger(__name__)
 
+router = Router()
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+@router.message(F.text == "/start")
+async def start_command(message: Message):
     """Обработчик команды /start"""
     welcome_text = """
 👋 Привет! Я бот для отправки HTML писем на email.
@@ -24,17 +28,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 3. Введите тему письма
 4. Отправьте HTML текст письма
     """
-    await update.message.reply_text(welcome_text)
+    await message.answer(welcome_text)
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@router.message(F.text == "/help")
+async def help_command(message: Message):
     """Обработчик команды /help"""
     help_text = """
 📖 Справка по использованию бота:
 
 1️⃣ Отправьте команду /send
 2️⃣ Бот попросит ввести email получателя
-   (или нажмите Enter для использования дефолтного)
+   (или отправьте /skip для использования дефолтного)
 3️⃣ Введите тему письма
 4️⃣ Отправьте HTML текст письма
 
@@ -48,36 +53,40 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⚠️ Убедитесь, что HTML валидный!
     """
-    await update.message.reply_text(help_text)
+    await message.answer(help_text)
 
 
-async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@router.message(F.text == "/send")
+async def send_command(message: Message, state: FSMContext):
     """Обработчик команды /send - начинает процесс отправки письма"""
-    user_id = update.effective_user.id
-    
     # Инициализируем состояние для пользователя
-    context.user_data['state'] = 'waiting_email'
-    context.user_data['email'] = None
-    context.user_data['subject'] = None
-    context.user_data['html_content'] = None
+    await state.set_state(EmailStates.waiting_email)
+    await state.update_data(email=None, subject=None, html_content=None)
     
     if DEFAULT_RECIPIENT:
-        text = f"📧 Введите email получателя (или нажмите /skip для использования дефолтного: {DEFAULT_RECIPIENT}):"
+        text = f"📧 Введите email получателя (или отправьте /skip для использования дефолтного: {DEFAULT_RECIPIENT}):"
     else:
         text = "📧 Введите email получателя:"
     
-    await update.message.reply_text(text)
+    await message.answer(text)
 
 
-async def skip_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@router.message(F.text == "/skip")
+async def skip_email(message: Message, state: FSMContext):
     """Пропустить ввод email и использовать дефолтный"""
     from config import DEFAULT_RECIPIENT
     
-    if not DEFAULT_RECIPIENT:
-        await update.message.reply_text("❌ Дефолтный email не настроен. Пожалуйста, введите email получателя.")
+    current_state = await state.get_state()
+    
+    # Проверяем, что мы в состоянии ожидания email
+    if current_state != EmailStates.waiting_email:
+        await message.answer("❌ Команда /skip доступна только при вводе email получателя.")
         return
     
-    context.user_data['email'] = DEFAULT_RECIPIENT
-    context.user_data['state'] = 'waiting_subject'
-    await update.message.reply_text(f"✅ Используется дефолтный email: {DEFAULT_RECIPIENT}\n\n📝 Теперь введите тему письма:")
-
+    if not DEFAULT_RECIPIENT:
+        await message.answer("❌ Дефолтный email не настроен. Пожалуйста, введите email получателя.")
+        return
+    
+    await state.update_data(email=DEFAULT_RECIPIENT)
+    await state.set_state(EmailStates.waiting_subject)
+    await message.answer(f"✅ Используется дефолтный email: {DEFAULT_RECIPIENT}\n\n📝 Теперь введите тему письма:")
