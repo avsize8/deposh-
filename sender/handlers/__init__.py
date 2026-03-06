@@ -1,5 +1,4 @@
-from .commands import start_command, help_command, send_command, skip_email
-from .messages import handle_message
+from . import commands, messages
 
-__all__ = ['start_command', 'help_command', 'send_command', 'skip_email', 'handle_message']
+__all__ = ['commands', 'messages']
 
